@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -28,8 +30,15 @@ type location struct {
 }
 
 var locations map[string]location
+var host string
+var port string
+var dataDir string
 
 func init() {
+	flag.StringVar(&host, "host", "127.0.0.1", "Host to run service on (defaults to 127.0.0.1)")
+	flag.StringVar(&port, "port", "8080", "Port to run service on (defaults to 8080)")
+	flag.StringVar(&dataDir, "data-dir", "./data", "Data directory (defaults to ./data)")
+
 	locations = make(map[string]location)
 	f, err := os.Open("data/US.txt")
 	if err != nil {
@@ -77,28 +86,34 @@ func parse(s string) (location, error) {
 }
 
 func main() {
+	flag.Parse()
+
 	beeline.Init(beeline.Config{
 		WriteKey: os.Getenv("HONEYCOMB_API_KEY"),
-		Dataset:  "ZipLookup",
+		Dataset:  os.Getenv("HONEYCOMB_DATASET"),
 	})
 	defer beeline.Close()
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Get("/{zip:[0-9]+}", getLocationByZip)
-	log.Println("listening on :8080...")
-	http.ListenAndServe(":8080", hnynethttp.WrapHandler(r))
-
+	hostPort := fmt.Sprintf("%s:%s", host, port)
+	log.Printf("listening on %s...", hostPort)
+	if err := http.ListenAndServe(hostPort, hnynethttp.WrapHandler(r)); err != nil {
+		log.Fatalln(err)
+	}
 }
 
 func getLocationByZip(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	ctx, span := beeline.StartSpan(ctx, "lookup")
+	_, span := beeline.StartSpan(ctx, "lookup")
 	defer span.Send()
 
 	zip := chi.URLParam(r, "zip")
 	if loc, found := locations[zip]; found {
-		w.Write([]byte(spew.Sdump(loc)))
+		if _, err := w.Write([]byte(spew.Sdump(loc))); err != nil {
+			log.Println(err)
+		}
 		// beeline.AddField(ctx, "interesting_thing", "banana")
 		return
 	}
