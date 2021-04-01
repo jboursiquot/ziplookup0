@@ -1,3 +1,5 @@
 vendor
 .envrc
 data/allCountries.txt
+build
+*.bin
